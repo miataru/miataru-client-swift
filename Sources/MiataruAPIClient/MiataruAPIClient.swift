@@ -3,35 +3,43 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Defines the structure for a Miataru server request.
-public struct MiataruRequest<T: Codable>: Codable {
-    let MiataruConfig: MiataruConfig
-    let payload: T
-    
-    // Custom coding keys to match the expected JSON structure.
-    enum CodingKeys: String, CodingKey {
-        case MiataruConfig
-        // The payload key is dynamic based on the type of request.
-        // This will be handled by the specific payload type's CodingKeys.
-        // We will merge the payload directly into the top-level object during encoding.
-        case payload
-    }
-    
-    // Since the payload's key is dynamic, we need custom encoding.
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(MiataruConfig, forKey: .MiataruConfig)
-        
-        // This is a simplified assumption. The actual key for the payload
-        // (e.g., "MiataruGetLocationHistory") needs to be part of the payload's encoding itself.
-        // A more robust implementation is needed here.
-        try payload.encode(to: encoder)
-    }
+// MARK: - Local Logging Helper
+
+/// Lightweight logging helper for the Miataru client library.
+///
+/// The main application target defines its own `debugLog` function, but it
+/// isn't visible inside this Swift package module. To keep the recent history
+/// logging changes compiling while still emitting useful diagnostics during
+/// development, we provide a local implementation that simply prints the
+/// message in debug builds.
+private func debugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print(message())
+#endif
 }
 
 /// Configuration part of the Miataru request.
 public struct MiataruConfig: Codable {
     let RequestMiataruDeviceID: String
+}
+
+/// Strongly typed request body for the GetLocationHistory endpoint.
+private struct GetLocationHistoryRequestBody: Encodable {
+    var MiataruConfig: MiataruConfig?
+    var MiataruGetLocationHistory: GetLocationHistoryPayload
+
+    enum CodingKeys: String, CodingKey {
+        case MiataruConfig
+        case MiataruGetLocationHistory
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let config = MiataruConfig {
+            try container.encode(config, forKey: .MiataruConfig)
+        }
+        try container.encode(MiataruGetLocationHistory, forKey: .MiataruGetLocationHistory)
+    }
 }
 
 /// Payload for GetLocation request.
@@ -131,11 +139,15 @@ public struct UpdateLocationPayload: Codable {
     private static func decodeDoubleStringOrNumber(container: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Double {
         if let doubleVal = try? container.decode(Double.self, forKey: key) {
             return doubleVal
-        } else if let stringVal = try? container.decode(String.self, forKey: key), let doubleVal = Double(stringVal) {
-            return doubleVal
-        } else {
-            throw DecodingError.dataCorruptedError(forKey: key, in: container, debugDescription: "Konnte Wert nicht als Double dekodieren.")
+        } else if let stringVal = try? container.decode(String.self, forKey: key) {
+            let normalized = stringVal
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: ",", with: ".")
+            if let doubleVal = Double(normalized) {
+                return doubleVal
+            }
         }
+        throw DecodingError.dataCorruptedError(forKey: key, in: container, debugDescription: "Konnte Wert nicht als Double dekodieren.")
     }
 }
 
@@ -201,11 +213,15 @@ public struct MiataruLocationData: Codable {
     private static func decodeDoubleStringOrNumber(container: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Double {
         if let doubleVal = try? container.decode(Double.self, forKey: key) {
             return doubleVal
-        } else if let stringVal = try? container.decode(String.self, forKey: key), let doubleVal = Double(stringVal) {
-            return doubleVal
-        } else {
-            throw DecodingError.dataCorruptedError(forKey: key, in: container, debugDescription: "Konnte Wert nicht als Double dekodieren.")
+        } else if let stringVal = try? container.decode(String.self, forKey: key) {
+            let normalized = stringVal
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: ",", with: ".")
+            if let doubleVal = Double(normalized) {
+                return doubleVal
+            }
         }
+        throw DecodingError.dataCorruptedError(forKey: key, in: container, debugDescription: "Konnte Wert nicht als Double dekodieren.")
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -242,6 +258,73 @@ public struct MiataruGetLocationResponse: Codable {
 public struct MiataruGetLocationHistoryResponse: Codable {
     let MiataruLocation: [MiataruLocationData]
     // We can add MiataruServerConfig here if needed in the future.
+
+    enum CodingKeys: String, CodingKey {
+        case MiataruLocation
+    }
+
+    public init(MiataruLocation: [MiataruLocationData]) {
+        self.MiataruLocation = MiataruLocation
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        guard var locationsContainer = try? container.nestedUnkeyedContainer(forKey: .MiataruLocation) else {
+            self.MiataruLocation = []
+            return
+        }
+
+        var parsedLocations: [MiataruLocationData] = []
+        var index = 0
+
+        while !locationsContainer.isAtEnd {
+            do {
+                let entry = try locationsContainer.decode(MiataruLocationData.self)
+                parsedLocations.append(entry)
+            } catch {
+                debugLog("[MiataruAPIClient] Skipping malformed history entry at index \(index): \(error)")
+                _ = try? locationsContainer.decode(SkipDecodable.self)
+            }
+            index += 1
+        }
+
+        self.MiataruLocation = parsedLocations
+    }
+}
+
+private struct SkipDecodable: Decodable {
+    init(from decoder: Decoder) throws {
+        if var unkeyed = try? decoder.unkeyedContainer() {
+            while !unkeyed.isAtEnd {
+                _ = try? unkeyed.decode(SkipDecodable.self)
+            }
+        } else if var keyed = try? decoder.container(keyedBy: AnyCodingKey.self) {
+            for key in keyed.allKeys {
+                _ = try? keyed.decode(SkipDecodable.self, forKey: key)
+            }
+        } else {
+            let container = try decoder.singleValueContainer()
+            if container.decodeNil() { return }
+            _ = try? container.decode(Bool.self)
+            _ = try? container.decode(Double.self)
+            _ = try? container.decode(String.self)
+        }
+    }
+}
+
+private struct AnyCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        self.stringValue = "\(intValue)"
+        self.intValue = intValue
+    }
 }
 
 /// The structure of the response for an UpdateLocation request.
@@ -250,9 +333,18 @@ public struct MiataruUpdateLocationResponse: Codable {
 }
 
 public enum MiataruAPIClient {
-    
+
     private static let session = URLSession.shared
     private static let jsonDecoder = JSONDecoder()
+
+    private static func makeJSONEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        // Keep the original property declaration order so the Miataru history
+        // payload encodes as `{ "Device": ..., "Amount": ... }` instead of
+        // being alphabetically sorted. The backend (and accompanying debug
+        // tooling) expects the keys in this order.
+        return encoder
+    }
     
     // MARK: - Public API Methods
     
@@ -308,24 +400,35 @@ public enum MiataruAPIClient {
                                   amount: Int) async throws -> [MiataruLocationData] {
         
         let url = serverURL.appendingPathComponent("v1/GetLocationHistory")
-        
-        var jsonPayload: [String: Any] = [
-            "MiataruGetLocationHistory": [
-                "Device": deviceID,
-                "Amount": String(amount)
-            ]
-        ]
 
-        if let reqDeviceID = requestingDeviceID {
-            jsonPayload["MiataruConfig"] = ["RequestMiataruDeviceID": reqDeviceID]
+        let sanitizedRequestID: String? = {
+            guard let value = requestingDeviceID, !value.isEmpty else { return nil }
+            return value
+        }()
+
+        let requestBody = GetLocationHistoryRequestBody(
+            MiataruConfig: sanitizedRequestID.map { MiataruConfig(RequestMiataruDeviceID: $0) },
+            MiataruGetLocationHistory: GetLocationHistoryPayload(Device: deviceID, Amount: String(amount))
+        )
+
+        let data: Data
+        do {
+            data = try await performPostRequest(url: url, encodablePayload: requestBody) {
+                "[MiataruAPIClient] Requesting history for device \(deviceID) amount=\(amount) payload=\($0)"
+            }
+        } catch APIError.encodingError(let err) {
+            debugLog("[MiataruAPIClient] Encoding history request failed for device \(deviceID): \(err.localizedDescription)")
+            throw APIError.encodingError(err)
         }
-        
-        let data = try await performPostRequest(url: url, jsonPayload: jsonPayload)
-        
+
         do {
             let response = try jsonDecoder.decode(MiataruGetLocationHistoryResponse.self, from: data)
+            debugLog("[MiataruAPIClient] Received history entries=\(response.MiataruLocation.count) for device \(deviceID)")
             return response.MiataruLocation
         } catch {
+            if let jsonString = String(data: data, encoding: .utf8) {
+                debugLog("[MiataruAPIClient] History decode failed for device \(deviceID). Payload=\(jsonString)")
+            }
             throw APIError.decodingError(error)
         }
     }
@@ -378,29 +481,68 @@ public enum MiataruAPIClient {
     // MARK: - Private Helper
     
     private static func performPostRequest(url: URL,
-                                          jsonPayload: [String: Any]) async throws -> Data {
-        var request: URLRequest
+                                          jsonPayload: [String: Any],
+                                          logMessage: ((String) -> String)? = nil) async throws -> Data {
         do {
             let data = try JSONSerialization.data(withJSONObject: jsonPayload)
-            request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.httpBody = data
+            let bodyString = String(data: data, encoding: .utf8)
+            return try await performPostRequest(url: url,
+                                                httpBody: data,
+                                                bodyString: bodyString,
+                                                customLog: logMessage)
         } catch {
+            debugLog("[MiataruAPIClient] Failed to encode request for URL \(url.absoluteString): \(error.localizedDescription)")
             throw APIError.encodingError(error)
         }
-        
+    }
+
+    private static func performPostRequest<T: Encodable>(url: URL,
+                                                         encodablePayload: T,
+                                                         logMessage: ((String) -> String)? = nil) async throws -> Data {
+        do {
+            let encoder = makeJSONEncoder()
+            let data = try encoder.encode(encodablePayload)
+            let bodyString = String(data: data, encoding: .utf8)
+            return try await performPostRequest(url: url,
+                                                httpBody: data,
+                                                bodyString: bodyString,
+                                                customLog: logMessage)
+        } catch {
+            debugLog("[MiataruAPIClient] Failed to encode request for URL \(url.absoluteString): \(error.localizedDescription)")
+            throw APIError.encodingError(error)
+        }
+    }
+
+    private static func performPostRequest(url: URL,
+                                          httpBody: Data,
+                                          bodyString: String?,
+                                          customLog: ((String) -> String)?) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = httpBody
+
+        if let bodyString = bodyString {
+            if let customLog = customLog {
+                debugLog(customLog(bodyString))
+            } else {
+                debugLog("[MiataruAPIClient] POST \(url.absoluteString) body=\(bodyString)")
+            }
+        }
+
         // Eigene async-Bridge für URLSession
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await withCheckedThrowingContinuation { continuation in
                 let task = session.dataTask(with: request) { data, response, error in
                     if let error = error {
+                        debugLog("[MiataruAPIClient] Request failed for URL \(url.absoluteString): \(error.localizedDescription)")
                         continuation.resume(throwing: APIError.requestFailed(error))
                         return
                     }
                     guard let data = data, let response = response else {
+                        debugLog("[MiataruAPIClient] Request returned without data for URL \(url.absoluteString)")
                         continuation.resume(throwing: APIError.invalidResponse(nil))
                         return
                     }
@@ -413,8 +555,18 @@ public enum MiataruAPIClient {
         } catch {
             throw APIError.requestFailed(error)
         }
-        
-        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            debugLog("[MiataruAPIClient] Non-HTTP response for URL \(url.absoluteString)")
+            throw APIError.invalidResponse(response)
+        }
+
+        debugLog("[MiataruAPIClient] Response status \(httpResponse.statusCode) for URL \(url.absoluteString)")
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if let responseString = String(data: data, encoding: .utf8) {
+                debugLog("[MiataruAPIClient] Error response body=\(responseString)")
+            }
             throw APIError.invalidResponse(response)
         }
         return data
