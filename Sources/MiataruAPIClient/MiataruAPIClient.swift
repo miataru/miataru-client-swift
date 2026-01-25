@@ -42,6 +42,20 @@ private struct GetLocationHistoryRequestBody: Encodable {
     }
 }
 
+/// Strongly typed request body for the GetVisitorHistory endpoint.
+private struct GetVisitorHistoryRequestBody: Encodable {
+    var MiataruGetVisitorHistory: GetVisitorHistoryPayload
+
+    enum CodingKeys: String, CodingKey {
+        case MiataruGetVisitorHistory
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(MiataruGetVisitorHistory, forKey: .MiataruGetVisitorHistory)
+    }
+}
+
 /// Payload for GetLocation request.
 public struct GetLocationPayload: Codable {
     public let Device: String
@@ -52,6 +66,16 @@ public struct GetLocationPayload: Codable {
 
 /// Payload for the GetLocationHistory request.
 public struct GetLocationHistoryPayload: Codable {
+    public let Device: String
+    public let Amount: String
+    public init(Device: String, Amount: String) {
+        self.Device = Device
+        self.Amount = Amount
+    }
+}
+
+/// Payload for the GetVisitorHistory request.
+public struct GetVisitorHistoryPayload: Codable {
     public let Device: String
     public let Amount: String
     public init(Device: String, Amount: String) {
@@ -293,6 +317,146 @@ public struct MiataruGetLocationHistoryResponse: Codable {
     }
 }
 
+/// Represents a visitor entry from the GetVisitorHistory response.
+public struct MiataruVisitor: Codable {
+    public let DeviceID: String
+    public let TimeStamp: String
+
+    /// Computed property for accessing the timestamp as a Date.
+    /// The timestamp from the API is in milliseconds, so we divide by 1000.
+    public var TimeStampDate: Date {
+        if let ts = Double(TimeStamp) {
+            // Timestamps from the API are in milliseconds, convert to seconds
+            return Date(timeIntervalSince1970: ts / 1000.0)
+        } else {
+            return Date(timeIntervalSince1970: 0)
+        }
+    }
+    
+    /// Unique identifier combining DeviceID and TimeStamp for use in ForEach
+    public var uniqueID: String {
+        return "\(DeviceID)-\(TimeStamp)"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case DeviceID
+        case TimeStamp
+    }
+
+    public init(DeviceID: String, TimeStamp: String) {
+        self.DeviceID = DeviceID
+        self.TimeStamp = TimeStamp
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        DeviceID = try container.decode(String.self, forKey: .DeviceID)
+        // TimeStamp can come as String or number
+        if let tsString = try? container.decode(String.self, forKey: .TimeStamp) {
+            TimeStamp = tsString
+        } else if let tsInt = try? container.decode(Int64.self, forKey: .TimeStamp) {
+            TimeStamp = String(tsInt)
+        } else if let tsDouble = try? container.decode(Double.self, forKey: .TimeStamp) {
+            TimeStamp = String(Int64(tsDouble))
+        } else {
+            TimeStamp = "0"
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(DeviceID, forKey: .DeviceID)
+        try container.encode(TimeStamp, forKey: .TimeStamp)
+    }
+}
+
+/// Server configuration information from GetVisitorHistory response.
+public struct MiataruVisitorHistoryServerConfig: Codable {
+    public let MaximumNumberOfVisitorHistory: String
+    public let AvailableVisitorHistory: String
+
+    enum CodingKeys: String, CodingKey {
+        case MaximumNumberOfVisitorHistory
+        case AvailableVisitorHistory
+    }
+
+    public init(MaximumNumberOfVisitorHistory: String, AvailableVisitorHistory: String) {
+        self.MaximumNumberOfVisitorHistory = MaximumNumberOfVisitorHistory
+        self.AvailableVisitorHistory = AvailableVisitorHistory
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // MaximumNumberOfVisitorHistory can come as String or number
+        if let maxString = try? container.decode(String.self, forKey: .MaximumNumberOfVisitorHistory) {
+            MaximumNumberOfVisitorHistory = maxString
+        } else if let maxInt = try? container.decode(Int.self, forKey: .MaximumNumberOfVisitorHistory) {
+            MaximumNumberOfVisitorHistory = String(maxInt)
+        } else if let maxDouble = try? container.decode(Double.self, forKey: .MaximumNumberOfVisitorHistory) {
+            MaximumNumberOfVisitorHistory = String(Int(maxDouble))
+        } else {
+            MaximumNumberOfVisitorHistory = "0"
+        }
+        
+        // AvailableVisitorHistory can come as String or number
+        if let availString = try? container.decode(String.self, forKey: .AvailableVisitorHistory) {
+            AvailableVisitorHistory = availString
+        } else if let availInt = try? container.decode(Int.self, forKey: .AvailableVisitorHistory) {
+            AvailableVisitorHistory = String(availInt)
+        } else if let availDouble = try? container.decode(Double.self, forKey: .AvailableVisitorHistory) {
+            AvailableVisitorHistory = String(Int(availDouble))
+        } else {
+            AvailableVisitorHistory = "0"
+        }
+    }
+}
+
+/// The structure of the response for a GetVisitorHistory request.
+public struct MiataruGetVisitorHistoryResponse: Codable {
+    public let MiataruServerConfig: MiataruVisitorHistoryServerConfig
+    public let MiataruVisitors: [MiataruVisitor]
+
+    enum CodingKeys: String, CodingKey {
+        case MiataruServerConfig
+        case MiataruVisitors
+    }
+
+    public init(MiataruServerConfig: MiataruVisitorHistoryServerConfig, MiataruVisitors: [MiataruVisitor]) {
+        self.MiataruServerConfig = MiataruServerConfig
+        self.MiataruVisitors = MiataruVisitors
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // Decode server config
+        MiataruServerConfig = try container.decode(MiataruVisitorHistoryServerConfig.self, forKey: .MiataruServerConfig)
+
+        // Decode visitors array with graceful handling of malformed entries
+        guard var visitorsContainer = try? container.nestedUnkeyedContainer(forKey: .MiataruVisitors) else {
+            MiataruVisitors = []
+            return
+        }
+
+        var parsedVisitors: [MiataruVisitor] = []
+        var index = 0
+
+        while !visitorsContainer.isAtEnd {
+            do {
+                let entry = try visitorsContainer.decode(MiataruVisitor.self)
+                parsedVisitors.append(entry)
+            } catch {
+                debugLog("[MiataruAPIClient] Skipping malformed visitor entry at index \(index): \(error)")
+                _ = try? visitorsContainer.decode(SkipDecodable.self)
+            }
+            index += 1
+        }
+
+        self.MiataruVisitors = parsedVisitors
+    }
+}
+
 private struct SkipDecodable: Decodable {
     init(from decoder: Decoder) throws {
         if var unkeyed = try? decoder.unkeyedContainer() {
@@ -428,6 +592,113 @@ public enum MiataruAPIClient {
         } catch {
             if let jsonString = String(data: data, encoding: .utf8) {
                 debugLog("[MiataruAPIClient] History decode failed for device \(deviceID). Payload=\(jsonString)")
+            }
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Fetches the visitor history for a specific device.
+    ///
+    /// Visitor history contains a list of devices that have requested the location
+    /// of the specified device. This information is stored on the server with every
+    /// request to the location or location history information of a device.
+    ///
+    /// - Parameters:
+    ///   - serverURL: The base URL of the Miataru server.
+    ///   - deviceID: The ID of the device to fetch the visitor history for.
+    ///   - amount: The maximum number of visitor history entries to retrieve.
+    /// - Returns: An array of visitor data objects.
+    /// - Throws: An `APIError` if the request fails.
+    public static func getVisitorHistory(serverURL: URL,
+                                  forDeviceID deviceID: String,
+                                  amount: Int) async throws -> [MiataruVisitor] {
+        
+        let url = serverURL.appendingPathComponent("v1/GetVisitorHistory")
+
+        let requestBody = GetVisitorHistoryRequestBody(
+            MiataruGetVisitorHistory: GetVisitorHistoryPayload(Device: deviceID, Amount: String(amount))
+        )
+
+        let data: Data
+        do {
+            data = try await performPostRequest(url: url, encodablePayload: requestBody) {
+                "[MiataruAPIClient] Requesting visitor history for device \(deviceID) amount=\(amount) payload=\($0)"
+            }
+        } catch APIError.encodingError(let err) {
+            debugLog("[MiataruAPIClient] Encoding visitor history request failed for device \(deviceID): \(err.localizedDescription)")
+            throw APIError.encodingError(err)
+        }
+
+        do {
+            let response = try jsonDecoder.decode(MiataruGetVisitorHistoryResponse.self, from: data)
+            debugLog("[MiataruAPIClient] Received visitor history entries=\(response.MiataruVisitors.count) for device \(deviceID)")
+            return response.MiataruVisitors
+        } catch {
+            if let jsonString = String(data: data, encoding: .utf8) {
+                debugLog("[MiataruAPIClient] Visitor history decode failed for device \(deviceID). Payload=\(jsonString)")
+            }
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Fetches the visitor history for a specific device from the server, including server configuration.
+    /// This version automatically requests all available visitor history entries from the server.
+    ///
+    /// - Parameters:
+    ///   - serverURL: The base URL of the Miataru server.
+    ///   - deviceID: The ID of the device to fetch the visitor history for.
+    ///   - amount: The maximum number of visitor history entries to retrieve. If nil, requests the maximum available from server.
+    /// - Returns: The full response including server config and visitors.
+    /// - Throws: An `APIError` if the request fails.
+    public static func getVisitorHistoryWithConfig(serverURL: URL,
+                                                   forDeviceID deviceID: String,
+                                                   amount: Int?) async throws -> MiataruGetVisitorHistoryResponse {
+        
+        let url = serverURL.appendingPathComponent("v1/GetVisitorHistory")
+        
+        // First request with a reasonable default to get server config
+        let initialAmount = amount ?? 1000
+        let requestBody = GetVisitorHistoryRequestBody(
+            MiataruGetVisitorHistory: GetVisitorHistoryPayload(Device: deviceID, Amount: String(initialAmount))
+        )
+
+        let data: Data
+        do {
+            data = try await performPostRequest(url: url, encodablePayload: requestBody) {
+                "[MiataruAPIClient] Requesting visitor history for device \(deviceID) amount=\(initialAmount) payload=\($0)"
+            }
+        } catch APIError.encodingError(let err) {
+            debugLog("[MiataruAPIClient] Encoding visitor history request failed for device \(deviceID): \(err.localizedDescription)")
+            throw APIError.encodingError(err)
+        }
+
+        do {
+            let response = try jsonDecoder.decode(MiataruGetVisitorHistoryResponse.self, from: data)
+            debugLog("[MiataruAPIClient] Received visitor history entries=\(response.MiataruVisitors.count) for device \(deviceID), available=\(response.MiataruServerConfig.AvailableVisitorHistory), max=\(response.MiataruServerConfig.MaximumNumberOfVisitorHistory)")
+            
+            // If amount was nil and we got fewer than available, request again with the available count
+            if amount == nil, let available = Int(response.MiataruServerConfig.AvailableVisitorHistory), available > response.MiataruVisitors.count {
+                let secondRequestBody = GetVisitorHistoryRequestBody(
+                    MiataruGetVisitorHistory: GetVisitorHistoryPayload(Device: deviceID, Amount: String(available))
+                )
+                do {
+                    let secondData = try await performPostRequest(url: url, encodablePayload: secondRequestBody) {
+                        "[MiataruAPIClient] Requesting full visitor history for device \(deviceID) amount=\(available) payload=\($0)"
+                    }
+                    let fullResponse = try jsonDecoder.decode(MiataruGetVisitorHistoryResponse.self, from: secondData)
+                    debugLog("[MiataruAPIClient] Received full visitor history entries=\(fullResponse.MiataruVisitors.count) for device \(deviceID)")
+                    return fullResponse
+                } catch {
+                    // If second request fails, return the first response
+                    debugLog("[MiataruAPIClient] Second visitor history request failed, using first response: \(error)")
+                    return response
+                }
+            }
+            
+            return response
+        } catch {
+            if let jsonString = String(data: data, encoding: .utf8) {
+                debugLog("[MiataruAPIClient] Visitor history decode failed for device \(deviceID). Payload=\(jsonString)")
             }
             throw APIError.decodingError(error)
         }
