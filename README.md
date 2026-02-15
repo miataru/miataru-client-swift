@@ -1,82 +1,76 @@
 # MiataruAPIClient
 
-Swift package for the Miataru API with a small example application.
+Dieses Repository enthält ein Swift Package zur Nutzung der Miataru API sowie eine Beispielapplikation.
 
-## Package Version
+## Struktur
 
-`1.2.0` (API 1.1 support)
+- `Sources/MiataruAPIClient/` – Das eigentliche Swift Package (Library)
+- `Examples/MiataruTestApp/` – Beispielapplikation und Dockerfile
 
-## Structure
+## Nutzung als Swift Package in Xcode
 
-- `Sources/MiataruAPIClient/` – Swift package (library)
-- `Examples/MiataruTestApp/` – Example app and Dockerfile
-
-## Add as Swift Package in Xcode
-
-1. Open your Xcode project.
-2. Choose **File > Add Packages...**
-3. Use the local path or the Git repository URL.
-4. Add the **MiataruAPIClient** product.
-5. Import the package:
+1. Öffne dein Xcode-Projekt.
+2. Wähle im Menü: **File > Add Packages...**
+3. Gib den lokalen Pfad zu diesem Ordner oder das Git-Repository an.
+4. Füge das Produkt **MiataruAPIClient** als Abhängigkeit hinzu.
+5. Importiere das Package in deinem Code:
    ```swift
    import MiataruAPIClient
    ```
 
-## API 1.1 Notes
-
-- `RequestMiataruDeviceID` is mandatory for `getLocation` and `getLocationHistory`.
-- Write operations and visitor history support `DeviceKey` authentication.
-- New endpoints: `deleteLocation`, `setDeviceKey`, `setAllowedDeviceList`.
-
-## Example Usage
-
-```swift
-let serverURL = URL(string: "https://service.miataru.com")!
-
-let locations = try await MiataruAPIClient.getLocation(
-    serverURL: serverURL,
-    forDeviceIDs: ["device-id"],
-    requestingDeviceID: "requesting-device-id",
-    requestingDeviceKey: "device-key"
-)
-
-let updated = try await MiataruAPIClient.updateLocation(
-    serverURL: serverURL,
-    locationData: UpdateLocationPayload(
-        Device: "device-id",
-        DeviceKey: "optional-device-key",
-        Timestamp: "1735689600",
-        Longitude: 8.5417,
-        Latitude: 47.3769,
-        HorizontalAccuracy: 15
-    ),
-    enableHistory: true,
-    retentionTime: 30
-)
-
-_ = try await MiataruAPIClient.setDeviceKey(
-    serverURL: serverURL,
-    deviceID: "device-id",
-    currentDeviceKey: nil,
-    newDeviceKey: "new-device-key"
-)
-```
-
-## Run the Example App Locally
+## Beispielapplikation lokal ausführen
 
 ```bash
 cd Examples/MiataruTestApp
 swift run
 ```
 
-## Run the Example App with Docker (from repo root)
+## Beispielapplikation mit Docker ausführen (aus Projekt-Root)
 
 ```bash
 docker build -f Examples/MiataruTestApp/Dockerfile -t miataru-testapp .
 docker run -it --rm miataru-testapp
 ```
 
-## Notes
+## Hinweise
+- Die Beispielapplikation sendet und liest Testdaten von https://service.miataru.com.
+- Passe ggf. die Device-IDs in `main.swift` an.
+- Die Library kann in eigenen Swift-Projekten verwendet werden.
 
-- The example app sends and reads test data from `https://service.miataru.com`.
-- Update device IDs in `main.swift` as needed.
+## GetLocation mit DeviceKey des anfragenden Geräts
+
+Die `getLocation`-Methode unterstützt optional den DeviceKey des anfragenden Geräts.
+Dadurch kann der Server eine Kombination aus `RequestMiataruDeviceID` und `RequestMiataruDeviceKey` validieren.
+
+```swift
+let locations = try await MiataruAPIClient.getLocation(
+    serverURL: serverURL,
+    forDeviceIDs: [targetDeviceID],
+    requestingDeviceID: ownDeviceID,
+    requestingDeviceKey: ownDeviceKey
+)
+```
+
+## Device Slogan API
+
+Die Library unterstützt jetzt auch die neuen Endpunkte `setDeviceSlogan` und `getDeviceSlogan`.
+
+```swift
+let setResponse = try await MiataruAPIClient.setDeviceSlogan(
+    serverURL: serverURL,
+    deviceID: ownDeviceID,
+    deviceKey: ownDeviceKey,
+    slogan: "Find me if you can"
+)
+
+let slogan = try await MiataruAPIClient.getDeviceSlogan(
+    serverURL: serverURL,
+    forDeviceID: targetDeviceID,
+    requestingDeviceID: ownDeviceID,
+    requestingDeviceKey: ownDeviceKey
+)
+
+print(setResponse.MiataruResponse)         // "ACK"
+print(slogan.DeviceID)                     // targetDeviceID
+print(slogan.Slogan ?? "(kein Slogan)")
+```
