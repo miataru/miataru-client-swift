@@ -4,7 +4,7 @@ Swift package for the Miataru API with a small example application.
 
 ## Package Version
 
-`1.1.0` (API 1.1 support)
+`1.2.0` (API 1.1 support)
 
 ## Structure
 
@@ -36,7 +36,8 @@ let serverURL = URL(string: "https://service.miataru.com")!
 let locations = try await MiataruAPIClient.getLocation(
     serverURL: serverURL,
     forDeviceIDs: ["device-id"],
-    requestingDeviceID: "requesting-device-id"
+    requestingDeviceID: "requesting-device-id",
+    requestingDeviceKey: "device-key"
 )
 
 let updated = try await MiataruAPIClient.updateLocation(

@@ -1,7 +1,7 @@
 // swift-tools-version:5.7
 import PackageDescription
 
-let packageVersion = "1.1.0"
+let packageVersion = "1.2.0"
 
 let package = Package(
     name: "MiataruAPIClient",
