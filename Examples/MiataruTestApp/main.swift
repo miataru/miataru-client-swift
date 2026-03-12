@@ -6,12 +6,12 @@ import FoundationNetworking
 import Dispatch
 import _Concurrency
 
-// Global flag to stop the loop
+// Globale Variable zum Beenden der Schleife
 var shouldTerminate = false
 
-// Signal handler for SIGINT (CTRL+C)
+// Signal-Handler für SIGINT (STRG+C)
 signal(SIGINT) { _ in
-    print("\nSIGINT received, stopping...", terminator: "\n")
+    print("\nSIGINT empfangen, beende...", terminator: "\n")
     fflush(stdout)
     shouldTerminate = true
 }
@@ -23,7 +23,7 @@ struct MiataruTestApp {
         let testPostDeviceID = "test-post-device-id"
 
         while !shouldTerminate {
-            // Generate a random location
+            // Zufällige Location erzeugen
             let longitude = Double.random(in: -180...180)
             let latitude = Double.random(in: -90...90)
             let accuracy = Double.random(in: 5...100)
@@ -36,7 +36,7 @@ struct MiataruTestApp {
                 HorizontalAccuracy: accuracy
             )
             do {
-                print("Sending random location: \(latitude), \(longitude) (accuracy: \(accuracy))")
+                print("Sende zufällige Location: \(String(format: "%.6f", latitude)), \(String(format: "%.6f", longitude)) (Genauigkeit: \(String(format: "%.1f", accuracy)))")
                 fflush(stdout)
                 let ack = try await MiataruAPIClient.updateLocation(
                     serverURL: serverURL,
@@ -44,35 +44,35 @@ struct MiataruTestApp {
                     enableHistory: true,
                     retentionTime: 30
                 )
-                print("UpdateLocation ACK: \(ack)")
+                print("UpdateLocation-ACK: \(ack)")
                 fflush(stdout)
             } catch {
-                print("Failed to send location: \(error)")
+                print("Fehler beim Senden der Location: \(error)")
                 fflush(stdout)
             }
             do {
-                print("Starting GetLocation test...")
+                print("Starte GetLocation-Test...")
                 fflush(stdout)
                 let locations = try await MiataruAPIClient.getLocation(
                     serverURL: serverURL,
                     forDeviceIDs: [testDeviceID],
-                    requestingDeviceID: testPostDeviceID
+                    requestingDeviceID: nil
                 )
-                print("GetLocation result:")
+                print("Ergebnis von GetLocation:")
                 for loc in locations {
                     print(loc)
                 }
             } catch {
-                print("Failed to fetch location: \(error)")
+                print("Fehler beim Abrufen der Location: \(error)")
             }
             if shouldTerminate {
                 break
             }
-            print("Waiting 5 seconds before next request...")
+            print("Warte 5 Sekunden bis zum nächsten Abruf...")
             fflush(stdout)
             try? await Task.sleep(nanoseconds: 5_000_000_000)
         }
-        print("Program finished.")
+        print("Programm beendet.")
     }
 }
 

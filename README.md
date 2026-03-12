@@ -49,6 +49,26 @@ let locations = try await MiataruAPIClient.getLocation(
     requestingDeviceID: ownDeviceID,
     requestingDeviceKey: ownDeviceKey
 )
+
+if let first = locations.first {
+    print(first.Device)                  // targetDeviceID
+    print(first.DeviceSlogan ?? "(kein Slogan)")
+}
+```
+
+## GetLocationHistory mit DeviceKey des anfragenden Geräts
+
+Die `getLocationHistory`-Methode unterstützt ebenfalls optional den DeviceKey des anfragenden Geräts.
+Dadurch kann der Server auch bei History-Abfragen die Kombination aus `RequestMiataruDeviceID` und `RequestMiataruDeviceKey` validieren.
+
+```swift
+let history = try await MiataruAPIClient.getLocationHistory(
+    serverURL: serverURL,
+    forDeviceID: targetDeviceID,
+    requestingDeviceID: ownDeviceID,
+    requestingDeviceKey: ownDeviceKey,
+    amount: 1000
+)
 ```
 
 ## Device Slogan API
@@ -73,4 +93,22 @@ let slogan = try await MiataruAPIClient.getDeviceSlogan(
 print(setResponse.MiataruResponse)         // "ACK"
 print(slogan.DeviceID)                     // targetDeviceID
 print(slogan.Slogan ?? "(kein Slogan)")
+```
+
+## Device Security Status API
+
+Die Library unterstützt zusätzlich den Endpunkt `getDeviceSecurityStatus`.
+Der Call erfordert die Authentifizierung über `RequestDeviceID` und `RequestDeviceKey`.
+
+```swift
+let securityStatus = try await MiataruAPIClient.getDeviceSecurityStatus(
+    serverURL: serverURL,
+    forDeviceID: targetDeviceID,
+    requestingDeviceID: ownDeviceID,
+    requestingDeviceKey: ownDeviceKey
+)
+
+print(securityStatus.DeviceID)                  // targetDeviceID
+print(securityStatus.HasDeviceKey)              // true/false
+print(securityStatus.IsAllowedDeviceListEnabled) // true/false
 ```
